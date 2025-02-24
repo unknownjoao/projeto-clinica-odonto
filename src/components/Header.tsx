@@ -162,8 +162,8 @@ export function Header() {
             </Link>
 
             <Link
-              href="/contato"
-              className={`p-[27px] flex items-center border-b-2 transition-all duration-300
+              href="#contact"
+              className={`p-[27px] flex items-center border-b-2 transition-all duration-300 
                 ${isScrolled ? "text-white" : "text-primary-dark-blue"}
                 ${
                   pathname === "/contato"
