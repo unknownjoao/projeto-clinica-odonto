@@ -1,5 +1,4 @@
 import { useState, ChangeEvent, useEffect } from "react";
-// import { User, Phone, Clock, MessageSquare, X } from "lucide-react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 
 import { appointmentService } from "../services/appointment";
@@ -20,6 +19,14 @@ interface FormData {
   date: string;
   timeSlot: string;
   message: string;
+}
+
+interface ValidationErrors {
+  name?: string;
+  phone?: string;
+  service?: string;
+  date?: string;
+  timeSlot?: string;
 }
 
 interface AppointmentModalProps {
@@ -58,8 +65,12 @@ export default function AppointmentModal({ onClose }: AppointmentModalProps) {
     timeSlot: "",
     message: "",
   });
+  const [errors, setErrors] = useState<ValidationErrors>({});
   const [availableTimeSlots, setAvailableTimeSlots] = useState<TimeSlot[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>("");
+  const [touchedFields, setTouchedFields] = useState<Record<string, boolean>>(
+    {}
+  );
 
   useEffect(() => {
     const fetchAvailableSlots = async () => {
@@ -91,6 +102,11 @@ export default function AppointmentModal({ onClose }: AppointmentModalProps) {
     fetchAvailableSlots();
   }, [selectedDate]);
 
+  // Validate form data on each change
+  useEffect(() => {
+    validateField();
+  }, [formData]);
+
   const handleInputChange = (
     e: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) => {
@@ -98,22 +114,148 @@ export default function AppointmentModal({ onClose }: AppointmentModalProps) {
     if (name === "date") {
       setSelectedDate(value);
     }
-    setFormData({ ...formData, [name]: value });
+
+    // Mark field as touched
+    setTouchedFields({ ...touchedFields, [name]: true });
+
+    // Special handling for phone field - only allow numbers and formatting
+    if (name === "phone") {
+      const numbersOnly = value.replace(/\D/g, "");
+      if (numbersOnly.length <= 11) {
+        // Format phone number as (XX) XXXXX-XXXX
+        let formattedPhone = "";
+        if (numbersOnly.length > 0) {
+          formattedPhone = `(${numbersOnly.slice(0, 2)}`;
+          if (numbersOnly.length > 2) {
+            formattedPhone += `) ${numbersOnly.slice(2, 7)}`;
+            if (numbersOnly.length > 7) {
+              formattedPhone += `-${numbersOnly.slice(7, 11)}`;
+            }
+          }
+        }
+        setFormData({ ...formData, [name]: formattedPhone });
+      }
+    } else {
+      setFormData({ ...formData, [name]: value });
+    }
+  };
+
+  const validateField = (specificField?: string): boolean => {
+    const newErrors: ValidationErrors = {};
+    let isValid = true;
+
+    // Only validate touched fields or the specific field being checked
+    const fieldsToValidate = specificField
+      ? [specificField]
+      : Object.keys(touchedFields).filter((field) => touchedFields[field]);
+
+    fieldsToValidate.forEach((field) => {
+      switch (field) {
+        case "name":
+          if (!formData.name.trim()) {
+            newErrors.name = "Nome é obrigatório";
+            isValid = false;
+          } else if (formData.name.trim().length < 3) {
+            newErrors.name = "Nome deve ter pelo menos 3 caracteres";
+            isValid = false;
+          }
+          break;
+
+        case "phone":
+          const phoneDigits = formData.phone.replace(/\D/g, "");
+          if (!formData.phone) {
+            newErrors.phone = "Telefone é obrigatório";
+            isValid = false;
+          } else if (phoneDigits.length !== 11) {
+            newErrors.phone = "Telefone deve ter 11 dígitos (DDD + número)";
+            isValid = false;
+          }
+          break;
+
+        case "service":
+          if (!formData.service) {
+            newErrors.service = "Selecione um serviço";
+            isValid = false;
+          }
+          break;
+
+        case "date":
+          if (!formData.date) {
+            newErrors.date = "Selecione uma data";
+            isValid = false;
+          } else {
+            const selectedDate = new Date(formData.date);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            if (selectedDate < today) {
+              newErrors.date = "A data não pode ser no passado";
+              isValid = false;
+            } else {
+              // Check if it's a weekend
+              const dayOfWeek = selectedDate.getDay();
+              if (dayOfWeek === 0 || dayOfWeek === 6) {
+                newErrors.date = "Não atendemos aos finais de semana";
+                isValid = false;
+              }
+            }
+          }
+          break;
+
+        case "timeSlot":
+          if (!formData.timeSlot) {
+            newErrors.timeSlot = "Selecione um horário";
+            isValid = false;
+          }
+          break;
+      }
+    });
+
+    setErrors((prev) => ({ ...prev, ...newErrors }));
+    return isValid;
   };
 
   const validateForm = (): boolean => {
+    // Mark all relevant fields as touched based on current step
+    const fieldsToTouch: Record<string, boolean> = {};
+
     if (step === 1) {
-      if (!formData.name || !formData.phone) {
-        toast.error("Por favor, preencha todos os campos");
-        return false;
-      }
+      fieldsToTouch.name = true;
+      fieldsToTouch.phone = true;
     } else if (step === 2) {
-      if (!formData.service || !formData.date || !formData.timeSlot) {
-        toast.error("Por favor, selecione o serviço, data e horário");
-        return false;
+      fieldsToTouch.service = true;
+      fieldsToTouch.date = true;
+      fieldsToTouch.timeSlot = true;
+    }
+
+    setTouchedFields((prev) => ({ ...prev, ...fieldsToTouch }));
+
+    // Validate all fields for the current step
+    const currentStepFields = Object.keys(fieldsToTouch);
+    let isValid = true;
+
+    currentStepFields.forEach((field) => {
+      if (!validateField(field)) {
+        isValid = false;
+      }
+    });
+
+    if (!isValid) {
+      // Show a more specific error message based on validation errors
+      const errorMessages = Object.values(errors).filter(Boolean);
+      if (errorMessages.length > 0) {
+        toast.error(errorMessages[0]);
+      } else {
+        toast.error("Por favor, corrija os campos destacados");
       }
     }
-    return true;
+
+    return isValid;
+  };
+
+  const handleBlur = (fieldName: string) => {
+    setTouchedFields({ ...touchedFields, [fieldName]: true });
+    validateField(fieldName);
   };
 
   const handleNext = () => {
@@ -238,11 +380,19 @@ export default function AppointmentModal({ onClose }: AppointmentModalProps) {
                   name="name"
                   value={formData.name}
                   onChange={handleInputChange}
-                  className="pl-10 w-full p-2 border border-off-white rounded-lg focus:ring-2 focus:ring-primary-blue focus:border-primary-blue bg-primary-beige"
+                  onBlur={() => handleBlur("name")}
+                  className={`pl-10 w-full p-2 border rounded-lg focus:ring-2 focus:ring-primary-blue focus:border-primary-blue bg-primary-beige ${
+                    errors.name && touchedFields.name
+                      ? "border-red-500"
+                      : "border-off-white"
+                  }`}
                   placeholder="Digite seu nome"
                   disabled={isLoading}
                 />
               </div>
+              {errors.name && touchedFields.name && (
+                <p className="mt-1 text-sm text-red-500">{errors.name}</p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-headline mb-1">
@@ -258,11 +408,19 @@ export default function AppointmentModal({ onClose }: AppointmentModalProps) {
                   name="phone"
                   value={formData.phone}
                   onChange={handleInputChange}
-                  className="pl-10 w-full p-2 border border-off-white rounded-lg focus:ring-2 focus:ring-primary-blue focus:border-primary-blue bg-primary-beige"
+                  onBlur={() => handleBlur("phone")}
+                  className={`pl-10 w-full p-2 border rounded-lg focus:ring-2 focus:ring-primary-blue focus:border-primary-blue bg-primary-beige ${
+                    errors.phone && touchedFields.phone
+                      ? "border-red-500"
+                      : "border-off-white"
+                  }`}
                   placeholder="(00) 00000-0000"
                   disabled={isLoading}
                 />
               </div>
+              {errors.phone && touchedFields.phone && (
+                <p className="mt-1 text-sm text-red-500">{errors.phone}</p>
+              )}
             </div>
           </div>
         )}
@@ -278,7 +436,12 @@ export default function AppointmentModal({ onClose }: AppointmentModalProps) {
                 name="service"
                 value={formData.service}
                 onChange={handleInputChange}
-                className="w-full p-2 border border-off-white rounded-lg focus:ring-2 focus:ring-primary-blue focus:border-primary-blue bg-primary-beige"
+                onBlur={() => handleBlur("service")}
+                className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-primary-blue focus:border-primary-blue bg-primary-beige ${
+                  errors.service && touchedFields.service
+                    ? "border-red-500"
+                    : "border-off-white"
+                }`}
                 disabled={isLoading}
               >
                 <option value="">Selecione um serviço</option>
@@ -288,6 +451,9 @@ export default function AppointmentModal({ onClose }: AppointmentModalProps) {
                   </option>
                 ))}
               </select>
+              {errors.service && touchedFields.service && (
+                <p className="mt-1 text-sm text-red-500">{errors.service}</p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-headline mb-1">
@@ -303,11 +469,19 @@ export default function AppointmentModal({ onClose }: AppointmentModalProps) {
                   name="date"
                   value={formData.date}
                   onChange={handleInputChange}
+                  onBlur={() => handleBlur("date")}
                   min={new Date().toISOString().split("T")[0]}
-                  className="pl-10 w-full p-2 border border-off-white rounded-lg focus:ring-2 focus:ring-primary-blue focus:border-primary-blue bg-primary-beige"
+                  className={`pl-10 w-full p-2 border rounded-lg focus:ring-2 focus:ring-primary-blue focus:border-primary-blue bg-primary-beige ${
+                    errors.date && touchedFields.date
+                      ? "border-red-500"
+                      : "border-off-white"
+                  }`}
                   disabled={isLoading}
                 />
               </div>
+              {errors.date && touchedFields.date && (
+                <p className="mt-1 text-sm text-red-500">{errors.date}</p>
+              )}
             </div>
             {selectedDate && (
               <div>
@@ -318,9 +492,10 @@ export default function AppointmentModal({ onClose }: AppointmentModalProps) {
                   {availableTimeSlots.map((slot) => (
                     <button
                       key={slot.id}
-                      onClick={() =>
-                        setFormData({ ...formData, timeSlot: slot.time })
-                      }
+                      onClick={() => {
+                        setFormData({ ...formData, timeSlot: slot.time });
+                        setTouchedFields({ ...touchedFields, timeSlot: true });
+                      }}
                       className={`p-2 rounded-lg text-sm ${
                         formData.timeSlot === slot.time
                           ? "bg-primary-blue text-white"
@@ -336,6 +511,9 @@ export default function AppointmentModal({ onClose }: AppointmentModalProps) {
                     </button>
                   ))}
                 </div>
+                {errors.timeSlot && touchedFields.timeSlot && (
+                  <p className="mt-1 text-sm text-red-500">{errors.timeSlot}</p>
+                )}
               </div>
             )}
           </div>
@@ -363,6 +541,35 @@ export default function AppointmentModal({ onClose }: AppointmentModalProps) {
                   disabled={isLoading}
                 />
               </div>
+            </div>
+
+            {/* Resumo da consulta */}
+            <div className="mt-4 p-4 bg-primary-light-blue rounded-lg">
+              <h3 className="font-medium text-primary-dark-blue mb-2">
+                Resumo da Consulta
+              </h3>
+              <ul className="space-y-1 text-sm">
+                <li>
+                  <span className="font-medium">Nome:</span> {formData.name}
+                </li>
+                <li>
+                  <span className="font-medium">Telefone:</span>{" "}
+                  {formData.phone}
+                </li>
+                <li>
+                  <span className="font-medium">Serviço:</span>{" "}
+                  {formData.service}
+                </li>
+                <li>
+                  <span className="font-medium">Data:</span>{" "}
+                  {formData.date &&
+                    new Date(formData.date).toLocaleDateString("pt-BR")}
+                </li>
+                <li>
+                  <span className="font-medium">Horário:</span>{" "}
+                  {formData.timeSlot}
+                </li>
+              </ul>
             </div>
           </div>
         )}

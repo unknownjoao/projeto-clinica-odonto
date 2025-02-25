@@ -9,8 +9,6 @@ import {
   faYoutube,
 } from "@fortawesome/free-brands-svg-icons";
 
-// import { Instagram, Facebook, Youtube } from 'lucide-react';
-
 export function Footer() {
   return (
     <footer className="bg-blue-500 text-white py-8">
